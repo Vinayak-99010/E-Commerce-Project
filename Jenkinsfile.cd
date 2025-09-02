@@ -1,0 +1,76 @@
+pipeline {
+  agent any
+  parameters {
+    choice(name: 'ENV', choices: ['develop','stage','preprod','prod'], description: 'Choose deployment environment')
+  }
+
+  environment {
+    REPO = "https://github.com/Vinayak-99010/E-Commerce-Project.git"
+    APP_DIR = "/opt/ecommerce-app" // on remote host where repo will be pulled
+  }
+
+  stages {
+    stage('Checkout') {
+      steps {
+        checkout([$class: 'GitSCM', branches:[[name:"*/main"]], userRemoteConfigs:[[url: env.REPO]]])
+      }
+    }
+
+    stage('Prepare target host') {
+      steps {
+        script {
+          // map ENV -> host
+          def hostMap = [
+            develop: "192.168.0.183",    // replace with your local dev machine IP
+            stage:   "100.27.8.36",      // set these via Jenkins credentials or env vars
+            preprod: "3.219.219.199",
+            prod:    "192.168.0.183"     // your local prod server IP
+          ]
+          env.TARGET_HOST = hostMap[params.ENV]
+          if (!env.TARGET_HOST) {
+            error "No target host configured for ${params.ENV}"
+          }
+        }
+      }
+    }
+
+    stage('Deploy to target via SSH') {
+      steps {
+        script {
+          // Jenkins requires SSH credentials stored (id: 'deploy-ssh')
+          sshagent (credentials: ['deploy-ssh']) {
+            sh """
+              ssh -o StrictHostKeyChecking=no ubuntu@${env.TARGET_HOST} '
+                set -e
+                sudo mkdir -p ${env.APP_DIR}
+                sudo chown ubuntu:ubuntu ${env.APP_DIR}
+                cd ${env.APP_DIR}
+                if [ -d .git ]; then
+                  git fetch --all
+                  git reset --hard origin/main
+                else
+                  git clone ${env.REPO} .
+                fi
+                # make sure correct branch
+                git checkout main
+                # build & run with docker-compose
+                sudo docker compose down || true
+                sudo docker compose build --no-cache
+                sudo docker compose up -d
+              '
+            """
+          }
+        }
+      }
+    }
+  }
+
+  post {
+    success {
+      echo "Deployment to ${params.ENV} succeeded"
+    }
+    failure {
+      echo "Deployment failed"
+    }
+  }
+}

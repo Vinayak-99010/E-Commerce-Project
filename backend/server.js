@@ -16,3 +16,9 @@ app.get('/api/products', (req, res) => {
 });
 
 app.listen(5000, () => console.log('Server running on http://192.168.0.183:5000'));
+// at bottom
+if (require.main === module) {
+  app.listen(5000, '0.0.0.0', () => console.log('Server started'));
+} else {
+  module.exports = app;
+}
